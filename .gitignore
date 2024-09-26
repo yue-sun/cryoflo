@@ -56,3 +56,8 @@ test/tmp_build_dir/
 test/Backtrace.*
 test/*plt*/
 test/chk*/
+sim*/*.ex
+sim*/tmp_build_dir/
+sim*/Backtrace.*
+sim*/*plt*/
+sim*/chk*/

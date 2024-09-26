@@ -1,3 +1,12 @@
+# cryoflo: 3D simulation of plunge-freezing for sample vitrification in cryo-EM
+
+This open-source software is designed as a digital twin of the plunge-freezing step for sample vitrification in cryogenic electron microscopy (cryo-EM).
+It is based and extended upon `incflo`, an AMReX-based simulation code for modeling incompressible Navier–Stokes fluids with complex geometries.
+
+_MORE DETAILS TO COME_
+
+_BELOW ARE INCFLO README_
+
 # Directory overview
 
 | Directory     | Description                                         |
