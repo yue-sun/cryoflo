@@ -20,6 +20,12 @@ public:
                          amrex::Vector<amrex::MultiFab const*> const& eta,
                          amrex::Real dt);
 
+    void diffuse_heat (amrex::Vector<amrex::MultiFab*> const& temp,
+                       amrex::Vector<amrex::MultiFab*> const& density,
+                       amrex::Vector<amrex::MultiFab*> const& cp,
+                       amrex::Vector<amrex::MultiFab const*> const& eta,
+                       amrex::Real dt);
+
     void diffuse_vel_components (
                          amrex::Vector<amrex::MultiFab*> const& vel,
                          amrex::Vector<amrex::MultiFab*> const& density,

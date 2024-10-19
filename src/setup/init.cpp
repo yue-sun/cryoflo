@@ -61,6 +61,7 @@ void incflo::ReadParameters ()
 
         pp.query("constant_density"         , m_constant_density);
         pp.query("advect_tracer"            , m_advect_tracer);
+        pp.query("advect_heat"              , m_advect_heat);
         pp.query("test_tracer_conservation" , m_test_tracer_conservation);
 
         // Are we advecting velocity or momentum (default is velocity)
@@ -157,6 +158,15 @@ void incflo::ReadParameters ()
         for (int i = 0; i < m_ntrac; i++) {
             amrex::Print() << "Tracer diffusion coeff: " << i << ":" << m_mu_s[i] << std::endl;
         }
+
+        // Scalar thermal conductivities
+        m_tc_k.resize(1, 0.0);
+        pp.queryarr("tc_k", m_tc_k, 0, 1);
+
+        amrex::Print() << "Scalar thermal conductivities " << std::endl;
+        for (int i = 0; i < 1; i++) {
+            amrex::Print() << "Thermal conductivity: " << i << ":" << m_tc_k[i] << std::endl;
+        }
     } // end prefix incflo
 
     ReadIOParameters();
@@ -251,6 +261,8 @@ void incflo::ReadIOParameters()
         m_plt_gpz        = 1;
         m_plt_rho        = 1;
         m_plt_tracer     = 1;
+        m_plt_temp       = 0;
+        m_plt_heat       = 0;
         m_plt_p          = 0;
         m_plt_macphi     = 0;
         m_plt_eta        = 0;
@@ -276,6 +288,8 @@ void incflo::ReadIOParameters()
 
     pp.query("plt_rho",        m_plt_rho   );
     pp.query("plt_tracer",     m_plt_tracer);
+    pp.query("plt_temp",       m_plt_temp  );
+    pp.query("plt_heat",       m_plt_heat  );
     pp.query("plt_p   ",       m_plt_p     );
     pp.query("plt_macphi",     m_plt_macphi);
     pp.query("plt_eta",        m_plt_eta   );
@@ -308,6 +322,8 @@ void incflo::InitialIterations ()
     copy_from_new_to_old_velocity();
     copy_from_new_to_old_density();
     copy_from_new_to_old_tracer();
+    copy_from_new_to_old_temp();
+    copy_from_new_to_old_heat();
 
     int initialisation = 1;
     bool explicit_diffusion = (m_diff_type == DiffusionType::Explicit);
@@ -325,10 +341,14 @@ void incflo::InitialIterations ()
 
     int ng = nghost_state();
     for (int lev = 0; lev <= finest_level; ++lev) {
-            fillpatch_velocity(lev, m_t_old[lev], m_leveldata[lev]->velocity_o, ng);
+        fillpatch_velocity(lev, m_t_old[lev], m_leveldata[lev]->velocity_o, ng);
         fillpatch_density(lev, m_t_old[lev], m_leveldata[lev]->density_o, ng);
         if (m_advect_tracer) {
             fillpatch_tracer(lev, m_t_old[lev], m_leveldata[lev]->tracer_o, ng);
+        }
+        if (m_advect_heat) {
+            fillpatch_temp(lev, m_t_old[lev], m_leveldata[lev]->temp_o, ng);
+            fillpatch_heat(lev, m_t_old[lev], m_leveldata[lev]->heat_o, ng);
         }
     }
 
@@ -341,6 +361,8 @@ void incflo::InitialIterations ()
         copy_from_old_to_new_velocity();
         copy_from_old_to_new_density();
         copy_from_old_to_new_tracer();
+        copy_from_old_to_new_temp();
+        copy_from_old_to_new_heat();
     }
 
     // Reset dt to get initial step as specified, otherwise we can see increase to dt
@@ -504,6 +526,15 @@ incflo::InitialRedistribution ()
             MultiFab::Copy(ld.tracer_o, ld.tracer, 0, 0, m_ntrac, ld.tracer.nGrow());
             fillpatch_tracer(lev, m_t_new[lev], ld.tracer_o, 3);
         }
+        if (m_advect_heat)
+        {
+            ld.temp.FillBoundary(geom[lev].periodicity());
+            MultiFab::Copy(ld.temp_o, ld.temp, 0, 0, 1, ld.temp.nGrow());
+            fillpatch_temp(lev, m_t_new[lev], ld.temp_o, 3);
+            ld.heat.FillBoundary(geom[lev].periodicity());
+            MultiFab::Copy(ld.heat_o, ld.heat, 0, 0, 1, ld.heat.nGrow());
+            fillpatch_heat(lev, m_t_new[lev], ld.heat_o, 3);
+        }
 
         for (MFIter mfi(ld.density,TilingIfNotGPU()); mfi.isValid(); ++mfi)
         {
@@ -554,6 +585,24 @@ incflo::InitialRedistribution ()
                                               AMREX_D_DECL(fcx, fcy, fcz), ccc,
                                               bc_tra, geom[lev], m_redistribution_type);
                 }
+                if (m_advect_heat)
+                {
+                    ncomp = 1;
+                    auto const& bc_temp = get_temp_bcrec_device_ptr();
+                    ApplyInitialRedistribution( bx,ncomp,
+                                              ld.temp.array(mfi), ld.temp_o.array(mfi),
+                                              flag, AMREX_D_DECL(apx, apy, apz), vfrac,
+                                              AMREX_D_DECL(fcx, fcy, fcz), ccc,
+                                              bc_temp, geom[lev], m_redistribution_type);
+
+                    ncomp = 1;
+                    auto const& bc_heat = get_heat_bcrec_device_ptr();
+                    ApplyInitialRedistribution( bx,ncomp,
+                                              ld.heat.array(mfi), ld.heat_o.array(mfi),
+                                              flag, AMREX_D_DECL(apx, apy, apz), vfrac,
+                                              AMREX_D_DECL(fcx, fcy, fcz), ccc,
+                                              bc_heat, geom[lev], m_redistribution_type);
+                }
             }
         }
 
@@ -561,6 +610,8 @@ incflo::InitialRedistribution ()
         ld.velocity.FillBoundary(geom[lev].periodicity());
         ld.density.FillBoundary(geom[lev].periodicity());
         ld.tracer.FillBoundary(geom[lev].periodicity());
+        ld.temp.FillBoundary(geom[lev].periodicity());
+        ld.heat.FillBoundary(geom[lev].periodicity());
     }
   }
 }

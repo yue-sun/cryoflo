@@ -71,6 +71,16 @@ incflo::diffuse_scalar(Vector<MultiFab      *> const& scalar,
     get_diffusion_scalar_op()->diffuse_scalar(scalar, density, eta, dt_diff);
 }
 
+void
+incflo::diffuse_heat(Vector<MultiFab      *> const& temp,
+                     Vector<MultiFab      *> const& density,
+                     Vector<MultiFab      *> const& cp,
+                     Vector<MultiFab const*> const& eta,
+                     Real dt_diff)
+{
+    get_diffusion_scalar_op()->diffuse_heat(temp, density, cp, eta, dt_diff);
+}
+
 
 void
 incflo::diffuse_velocity(Vector<MultiFab      *> const& vel,

@@ -15,6 +15,8 @@ using namespace amrex;
 //          conv_t  = - div( u trac )
 //      else
 //          conv_t  = - u dot grad trac
+//      if (m_advect_heat) then
+//          conv_h  = - div( u heat )
 //      eta_old     = visosity at m_cur_time
 //      if (m_diff_type == DiffusionType::Explicit)
 //         divtau _old = div( eta ( (grad u) + (grad u)^T ) ) / rho^n
@@ -101,6 +103,7 @@ void incflo::ApplyPredictor (bool incremental_projection)
     Vector<MultiFab> vel_forces, tra_forces;
 
     Vector<MultiFab> vel_eta, tra_eta;
+    Vector<MultiFab> heat_eta;
 
     // *************************************************************************************
     // Allocate space for the forcing terms
@@ -116,6 +119,9 @@ void incflo::ApplyPredictor (bool incremental_projection)
         vel_eta.emplace_back(grids[lev], dmap[lev], 1, 1, MFInfo(), Factory(lev));
         if (m_advect_tracer) {
             tra_eta.emplace_back(grids[lev], dmap[lev], m_ntrac, 1, MFInfo(), Factory(lev));
+        }
+        if (m_advect_heat) {
+            heat_eta.emplace_back(grids[lev], dmap[lev], 1, 1, MFInfo(), Factory(lev));
         }
     }
 
@@ -146,6 +152,13 @@ void incflo::ApplyPredictor (bool incremental_projection)
             compute_laps(get_laps_old(), get_tracer_old_const(), GetVecOfConstPtrs(tra_eta));
         }
     }
+    if (m_advect_heat)
+    {
+        compute_heat_diff_coeff(GetVecOfPtrs(heat_eta),1);
+        if (need_divtau()) {
+            compute_laps(get_laps_temp_old(), get_heat_old_const(), GetVecOfConstPtrs(heat_eta));
+        }
+    }
 
     // **********************************************************************************************
     // Compute the forcing terms
@@ -170,7 +183,9 @@ void incflo::ApplyPredictor (bool incremental_projection)
     // Note that if advection_type != "MOL" then we call compute_tra_forces inside this routine
     // *************************************************************************************
     compute_convective_term(get_conv_velocity_old(), get_conv_density_old(), get_conv_tracer_old(),
+                            get_conv_heat_old(),
                             get_velocity_old_const(), get_density_old_const(), get_tracer_old_const(),
+                            get_heat_old_const(),
                             AMREX_D_DECL(GetVecOfPtrs(u_mac), GetVecOfPtrs(v_mac),
                             GetVecOfPtrs(w_mac)),
                             GetVecOfPtrs(vel_forces), GetVecOfPtrs(tra_forces),
@@ -185,6 +200,11 @@ void incflo::ApplyPredictor (bool incremental_projection)
     // Update tracer
     // **********************************************************************************************
     update_tracer(StepType::Predictor, tra_eta, tra_forces);
+
+    // **********************************************************************************************
+    // Update heat
+    // **********************************************************************************************
+    update_heat(StepType::Predictor, heat_eta);
 
     // **********************************************************************************************
     // Update velocity

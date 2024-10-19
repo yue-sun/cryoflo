@@ -98,6 +98,7 @@ void incflo::ApplyCorrector()
     // **********************************************************************************************
     Vector<MultiFab> vel_forces, tra_forces;
     Vector<MultiFab> vel_eta, tra_eta;
+    Vector<MultiFab> heat_eta;
     for (int lev = 0; lev <= finest_level; ++lev) {
         vel_forces.emplace_back(grids[lev], dmap[lev], AMREX_SPACEDIM, nghost_force(),
                                 MFInfo(), Factory(lev));
@@ -108,6 +109,9 @@ void incflo::ApplyCorrector()
         vel_eta.emplace_back(grids[lev], dmap[lev], 1, 1, MFInfo(), Factory(lev));
         if (m_advect_tracer) {
             tra_eta.emplace_back(grids[lev], dmap[lev], m_ntrac, 1, MFInfo(), Factory(lev));
+        }
+        if (m_advect_heat) {
+            heat_eta.emplace_back(grids[lev], dmap[lev], 1, 1, MFInfo(), Factory(lev));
         }
     }
 
@@ -125,7 +129,9 @@ void incflo::ApplyCorrector()
     // Compute the explicit "new" advective terms R_u^(n+1,*), R_r^(n+1,*) and R_t^(n+1,*)
     // *************************************************************************************
     compute_convective_term(get_conv_velocity_new(), get_conv_density_new(), get_conv_tracer_new(),
+                            get_conv_heat_new(),
                             get_velocity_new_const(), get_density_new_const(), get_tracer_new_const(),
+                            get_heat_new_const(),
                             AMREX_D_DECL(GetVecOfPtrs(u_mac), GetVecOfPtrs(v_mac),
                             GetVecOfPtrs(w_mac)),
                             {}, {}, new_time);
@@ -151,6 +157,11 @@ void incflo::ApplyCorrector()
     // Update tracer
     // *************************************************************************************
     update_tracer(StepType::Corrector, tra_eta, tra_forces);
+
+    // *************************************************************************************
+    // Update heat
+    // *************************************************************************************
+    update_heat(StepType::Corrector, heat_eta);
 
     // *************************************************************************************
     // Update velocity

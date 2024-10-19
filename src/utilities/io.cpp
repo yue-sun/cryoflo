@@ -93,6 +93,13 @@ void incflo::WriteCheckPointFile() const
                          amrex::MultiFabFileFullPrefix(lev, checkpointname, level_prefix, "tracer"));
         }
 
+        if (m_advect_heat) {
+            VisMF::Write(m_leveldata[lev]->heat,
+                         amrex::MultiFabFileFullPrefix(lev, checkpointname, level_prefix, "heat"));
+            VisMF::Write(m_leveldata[lev]->temp,
+                         amrex::MultiFabFileFullPrefix(lev, checkpointname, level_prefix, "temp"));
+        }
+
         VisMF::Write(m_leveldata[lev]->gp,
                      amrex::MultiFabFileFullPrefix(lev, checkpointname, level_prefix, "gradp"));
 
@@ -228,6 +235,13 @@ void incflo::ReadCheckpointFile()
                         amrex::MultiFabFileFullPrefix(lev, m_restart_file, level_prefix, "tracer"));
         }
 
+        if (m_advect_heat) {
+            VisMF::Read(m_leveldata[lev]->heat,
+                        amrex::MultiFabFileFullPrefix(lev, m_restart_file, level_prefix, "heat"));
+            VisMF::Read(m_leveldata[lev]->temp,
+                        amrex::MultiFabFileFullPrefix(lev, m_restart_file, level_prefix, "temp"));
+        }
+
         VisMF::Read(m_leveldata[lev]->gp,
                     amrex::MultiFabFileFullPrefix(lev, m_restart_file, level_prefix, "gradp"));
 
@@ -338,7 +352,7 @@ void incflo::WritePlotFile()
 {
     BL_PROFILE("incflo::WritePlotFile()");
 
-    if (m_plt_vort || m_plt_divu || m_plt_forcing || m_plt_eta || m_plt_strainrate) {
+    if (m_plt_vort || m_plt_divu || m_plt_forcing || m_plt_eta || m_plt_strainrate || m_plt_temp || m_plt_heat) {
         for (int lev = 0; lev <= finest_level; ++lev) {
 #ifdef AMREX_USE_EB
             const int ng = (EBFactory(0).isAllRegular()) ? 1 : 2;
@@ -348,6 +362,8 @@ void incflo::WritePlotFile()
             fillpatch_velocity(lev, m_cur_time, m_leveldata[lev]->velocity, ng);
             fillpatch_density(lev, m_cur_time, m_leveldata[lev]->density, ng);
             fillpatch_tracer(lev, m_cur_time, m_leveldata[lev]->tracer, ng);
+            fillpatch_temp(lev, m_cur_time, m_leveldata[lev]->temp, ng);
+            fillpatch_heat(lev, m_cur_time, m_leveldata[lev]->heat, ng);
         }
     }
 
@@ -376,6 +392,12 @@ void incflo::WritePlotFile()
 
     // Tracers
     if (m_plt_tracer) ncomp += m_ntrac;
+
+    // Temperature
+    if (m_plt_temp) ++ncomp;
+
+    // Heat
+    if (m_plt_heat) ++ncomp;
 
     // Pressure
     if(m_plt_p) ++ncomp;
@@ -497,6 +519,18 @@ void incflo::WritePlotFile()
             pltscaVarsName.push_back("tracer"+std::to_string(i));
         }
         icomp += m_ntrac;
+    }
+    if (m_plt_temp) {
+        for (int lev = 0; lev <= finest_level; ++lev)
+            MultiFab::Copy(mf[lev], m_leveldata[lev]->temp, 0, icomp, 1, 0);
+        pltscaVarsName.push_back("temp");
+        ++icomp;
+    }
+    if (m_plt_heat) {
+        for (int lev = 0; lev <= finest_level; ++lev)
+            MultiFab::Copy(mf[lev], m_leveldata[lev]->heat, 0, icomp, 1, 0);
+        pltscaVarsName.push_back("heat");
+        ++icomp;
     }
     if (m_plt_p) {
         if (m_use_cc_proj) {

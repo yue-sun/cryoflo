@@ -132,6 +132,8 @@ void incflo::ApplyNodalProjection (Vector<MultiFab const*> const& density,
            set_eb_velocity(lev, time, *get_velocity_eb()[lev], 1);
            set_eb_density(lev, time, *get_density_eb()[lev], 1);
            set_eb_tracer(lev, time, *get_tracer_eb()[lev], 1);
+           set_eb_temp(lev, time, *get_temp_eb()[lev], 1);
+           set_eb_heat(lev, time, *get_heat_eb()[lev], 1);
         }
 #endif
         vel[lev]->setBndry(0.0);

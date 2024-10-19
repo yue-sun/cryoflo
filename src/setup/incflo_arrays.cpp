@@ -19,6 +19,17 @@ incflo::LevelData::LevelData (amrex::BoxArray const& ba,
       tracer_eb (ba, dm, my_incflo->m_ntrac, my_incflo->nghost_state(), MFInfo(), fact),
       tracer_o  (ba, dm, my_incflo->m_ntrac, my_incflo->nghost_state(), MFInfo(), fact),
 
+      temp    (ba, dm, 1             , my_incflo->nghost_state(), MFInfo(), fact),
+      temp_eb (ba, dm, 1             , my_incflo->nghost_state(), MFInfo(), fact),
+      temp_o  (ba, dm, 1             , my_incflo->nghost_state(), MFInfo(), fact),
+
+      heat    (ba, dm, 1             , my_incflo->nghost_state(), MFInfo(), fact),
+      heat_eb (ba, dm, 1             , my_incflo->nghost_state(), MFInfo(), fact),
+      heat_o  (ba, dm, 1             , my_incflo->nghost_state(), MFInfo(), fact),
+      
+      cp      (ba, dm, 1             , my_incflo->nghost_state() , MFInfo(), fact),
+      cp_o    (ba, dm, 1             , my_incflo->nghost_state() , MFInfo(), fact),
+
       mac_phi   (ba, dm, 1             , 1       , MFInfo(), fact),
       p_cc      (ba, dm, 1             , 1       , MFInfo(), fact),
       p_nd      (amrex::convert(ba,IntVect::TheNodeVector()),
@@ -27,17 +38,22 @@ incflo::LevelData::LevelData (amrex::BoxArray const& ba,
 
       conv_velocity_o (ba, dm, AMREX_SPACEDIM    , 0, MFInfo(), fact),
       conv_density_o  (ba, dm, 1                 , 0, MFInfo(), fact),
-      conv_tracer_o   (ba, dm, my_incflo->m_ntrac, 0, MFInfo(), fact)
+      conv_tracer_o   (ba, dm, my_incflo->m_ntrac, 0, MFInfo(), fact),
+      conv_heat_o     (ba, dm, 1                 , 0, MFInfo(), fact)
 {
     if (my_incflo->m_advection_type != "MOL") {
         divtau_o.define(ba, dm, AMREX_SPACEDIM, 0, MFInfo(), fact);
         if (my_incflo->m_advect_tracer) {
             laps_o.define(ba, dm, my_incflo->m_ntrac, 0, MFInfo(), fact);
         }
+        if (my_incflo->m_advect_heat) {
+            laps_temp_o.define(ba, dm, 1, 0, MFInfo(), fact);
+        }
     } else {
-        conv_velocity.define(ba, dm, AMREX_SPACEDIM   , 0, MFInfo(), fact);
-        conv_density.define (ba, dm, 1                , 0, MFInfo(), fact);
-        conv_tracer.define (ba, dm, my_incflo->m_ntrac, 0, MFInfo(), fact);
+        conv_velocity.define(ba, dm, AMREX_SPACEDIM    , 0, MFInfo(), fact);
+        conv_density.define (ba, dm, 1                 , 0, MFInfo(), fact);
+        conv_tracer.define  (ba, dm, my_incflo->m_ntrac, 0, MFInfo(), fact);
+        conv_heat.define    (ba, dm, 1                 , 0, MFInfo(), fact);
 
         bool implicit_diffusion = my_incflo->m_diff_type == DiffusionType::Implicit;
         if (!implicit_diffusion || my_incflo->use_tensor_correction)
@@ -49,6 +65,11 @@ incflo::LevelData::LevelData (amrex::BoxArray const& ba,
         {
             laps.define  (ba, dm, my_incflo->m_ntrac, 0, MFInfo(), fact);
             laps_o.define(ba, dm, my_incflo->m_ntrac, 0, MFInfo(), fact);
+        }
+        if (!implicit_diffusion && my_incflo->m_advect_heat)
+        {
+            laps_temp.define  (ba, dm, 1, 0, MFInfo(), fact);
+            laps_temp_o.define(ba, dm, 1, 0, MFInfo(), fact);
         }
     }
 }

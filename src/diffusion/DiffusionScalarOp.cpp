@@ -329,6 +329,173 @@ DiffusionScalarOp::diffuse_scalar (Vector<MultiFab*> const& tracer,
 }
 
 void
+DiffusionScalarOp::diffuse_heat (Vector<MultiFab*> const& temp,
+                                 Vector<MultiFab*> const& density,
+                                 Vector<MultiFab*> const& cp,
+                                 Vector<MultiFab const*> const& eta,
+                                 Real dt)
+{
+    //
+    // Solves
+    //      alpha a - beta div ( b grad )
+    //
+    // So for conservative: d(rho cp temp) / dt - div k grad temp = -div(U rho cp temp) -->
+    //                      ( rho - dt div k grad ) temp^(n+1) = rho cp temp^(*,n+1)
+    //      alpha: 1
+    //      a: rho
+    //      beta: dt
+    //      b: k
+    //      RHS: density * cp * temp
+
+    if (m_verbose > 0)
+    {
+        amrex::Print() << "Diffusing heat ..." << std::endl;
+    }
+
+    const int finest_level = m_incflo->finestLevel();
+
+    Vector<MultiFab> rhs_c(finest_level + 1);
+    // Note only conservative uses this rhs_c container
+    for (int lev = 0; lev <= finest_level; ++lev)
+    {
+        rhs_c[lev].define(temp[lev]->boxArray(), temp[lev]->DistributionMap(), 1, 0);
+    }
+
+    auto iconserv_temp = m_incflo->get_temp_iconserv();
+#ifdef AMREX_USE_EB
+    if (m_eb_scal_solve_op)
+    {
+        m_eb_scal_solve_op->setScalars(1.0, dt);
+        for (int lev = 0; lev <= finest_level; ++lev)
+        {
+            m_eb_scal_solve_op->setACoeffs(lev, *density[lev]);
+        }
+    }
+    else
+#endif
+    {
+        m_reg_scal_solve_op->setScalars(1.0, dt);
+        for (int lev = 0; lev <= finest_level; ++lev)
+        {
+            m_reg_scal_solve_op->setACoeffs(lev, *density[lev]);
+        }
+    }
+
+    for (int comp = 0; comp < temp[0]->nComp(); ++comp)
+    {
+#ifdef AMREX_USE_EB
+        if (m_eb_scal_solve_op)
+        {
+            if (m_incflo->m_has_mixedBC && comp > 0)
+            {
+                // Must reset scalars (and Acoef, done below) to reuse solver with Robin BC
+                m_eb_scal_solve_op->setScalars(1.0, dt);
+            }
+
+            for (int lev = 0; lev <= finest_level; ++lev)
+            {
+                // Only reset Acoeff if necessary.
+                if (comp > 0 &&
+                    (m_incflo->m_has_mixedBC || (iconserv_temp[comp] != iconserv_temp[comp - 1])))
+                {
+                    m_eb_scal_solve_op->setACoeffs(lev, *density[lev]);
+                }
+
+                Array<MultiFab, AMREX_SPACEDIM> b = m_incflo->average_scalar_eta_to_faces(lev, comp, *eta[lev]);
+                m_eb_scal_solve_op->setBCoeffs(lev, GetArrOfConstPtrs(b), MLMG::Location::FaceCentroid);
+            }
+        }
+        else
+#endif
+        {
+            for (int lev = 0; lev <= finest_level; ++lev)
+            {
+                if (comp > 0 && (iconserv_temp[comp] != iconserv_temp[comp - 1]))
+                {
+                    m_reg_scal_solve_op->setACoeffs(lev, *density[lev]);
+                }
+
+                Array<MultiFab, AMREX_SPACEDIM> b = m_incflo->average_scalar_eta_to_faces(lev, comp, *eta[lev]);
+                m_reg_scal_solve_op->setBCoeffs(lev, GetArrOfConstPtrs(b));
+            }
+        }
+
+        Vector<MultiFab> phi;
+        Vector<MultiFab> rhs;
+        for (int lev = 0; lev <= finest_level; ++lev)
+        {
+            phi.emplace_back(*temp[lev], amrex::make_alias, comp, 1);
+            rhs.emplace_back(rhs_c[lev], amrex::make_alias, 0, 1);
+#ifdef _OPENMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+            for (MFIter mfi(rhs[lev], TilingIfNotGPU()); mfi.isValid(); ++mfi)
+            {
+                Box const &bx = mfi.tilebox();
+                Array4<Real> const &rhs_a = rhs[lev].array(mfi);
+                Array4<Real const> const &temp_a = temp[lev]->const_array(mfi, comp);
+                Array4<Real const> const &rho_a = density[lev]->const_array(mfi);
+                Array4<Real const> const &cp_a = cp[lev]->const_array(mfi);
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept
+                {
+                    rhs_a(i, j, k) = rho_a(i, j, k) * cp_a(i, j, k) * temp_a(i, j, k);
+                });
+            }
+
+#ifdef AMREX_USE_EB
+            if (m_eb_scal_solve_op) {
+                if (m_incflo->m_has_mixedBC) {
+                    auto const robin = m_incflo->make_robinBC_MFs(lev, &phi[lev]);
+
+                    m_eb_scal_solve_op->setLevelBC(lev, &phi[lev],
+                                                &robin[0], &robin[1], &robin[2]);
+                }
+                else {
+                    m_eb_scal_solve_op->setLevelBC(lev, &phi[lev]);
+                }
+
+                // For when we use the stencil for centroid values
+                // m_eb_scal_solve_op->setPhiOnCentroid();
+            }
+            else
+#endif
+            {
+                m_reg_scal_solve_op->setLevelBC(lev, &phi[lev]);
+            }
+        }
+
+#ifdef AMREX_USE_EB
+        MLMG mlmg(m_eb_scal_solve_op ? static_cast<MLLinOp &>(*m_eb_scal_solve_op) : static_cast<MLLinOp &>(*m_reg_scal_solve_op));
+#else
+        MLMG mlmg(*m_reg_scal_solve_op);
+#endif
+
+        // The default bottom solver is BiCG
+        if (m_mg_bottom_solver == "smoother")
+        {
+            mlmg.setBottomSolver(MLMG::BottomSolver::smoother);
+        }
+        else if (m_mg_bottom_solver == "hypre")
+        {
+            mlmg.setBottomSolver(MLMG::BottomSolver::hypre);
+        }
+        // Maximum iterations for MultiGrid / ConjugateGradients
+        mlmg.setMaxIter(m_mg_max_iter);
+        mlmg.setMaxFmgIter(m_mg_max_fmg_iter);
+        mlmg.setBottomMaxIter(m_mg_bottom_maxiter);
+
+        // Verbosity for MultiGrid / ConjugateGradients
+        mlmg.setVerbose(m_mg_verbose);
+        mlmg.setBottomVerbose(m_mg_bottom_verbose);
+
+        mlmg.setPreSmooth(m_num_pre_smooth);
+        mlmg.setPostSmooth(m_num_post_smooth);
+
+        mlmg.solve(GetVecOfPtrs(phi), GetVecOfConstPtrs(rhs), m_mg_rtol, m_mg_atol);
+    }
+}
+
+void
 DiffusionScalarOp::diffuse_vel_components (Vector<MultiFab*> const& vel,
                                            Vector<MultiFab*> const& density,
                                            Vector<MultiFab const*> const& eta,

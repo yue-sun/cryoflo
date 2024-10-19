@@ -33,7 +33,7 @@ void incflo::update_tracer (StepType step_type, Vector<MultiFab>& tra_eta, Vecto
         // *************************************************************************************
         // Update the tracer next (note that dtdt already has rho in it)
         // (rho trac)^new = (rho trac)^old + dt * (
-        //                   div(rho trac u) + div (mu grad trac) + rho * f_t
+        //                   div(rho trac u) + div (mu grad trac) + rho * f_t )
         // *************************************************************************************
         if (step_type == StepType::Predictor) {
             tracer_explicit_update(tra_forces);

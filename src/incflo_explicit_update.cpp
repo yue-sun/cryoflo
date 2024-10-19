@@ -190,3 +190,126 @@ void incflo::tracer_explicit_update_corrector (Vector<MultiFab> const& tra_force
         } // mfi
     } // lev
 }
+
+void incflo::heat_explicit_update ()
+{
+    if (m_advect_heat == 0) { return; }
+
+    constexpr Real m_half = Real(0.5);
+    Real l_dt = m_dt;
+    for (int lev = 0; lev <= finest_level; lev++)
+    {
+        auto& ld = *m_leveldata[lev];
+#ifdef _OPENMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(ld.heat,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            Box const& bx = mfi.tilebox();
+            Array4<Real const> const& heat_o = ld.heat_o.const_array(mfi);
+            Array4<Real const> const& rho_o  = ld.density_o.const_array(mfi);
+            Array4<Real> const& heat         = ld.heat.array(mfi);
+            Array4<Real const> const& rho    = ld.density.const_array(mfi);
+            Array4<Real const> const& dhdt_o = ld.conv_heat_o.const_array(mfi);
+
+            // Heat is always updated conservatively
+            if (m_diff_type == DiffusionType::Explicit)
+            {
+                Array4<Real const> const& laps_temp_o = ld.laps_temp_o.const_array(mfi);
+
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                {
+                    // heat = c_p * temp
+                    // (rho heat)^new = (rho heat)^old + dt * (
+                    //                   div(rho heat u) + div (k grad temp) )
+                    Real heat_new = rho_o(i,j,k)*heat_o(i,j,k) + l_dt *
+                        ( dhdt_o(i,j,k) + laps_temp_o(i,j,k) );
+                    heat(i,j,k) = heat_new/rho(i,j,k);
+                });
+            }
+            else if (m_diff_type == DiffusionType::Crank_Nicolson)
+            {
+                Array4<Real const> const& laps_temp_o = ld.laps_temp_o.const_array(mfi);
+
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                {
+                    Real heat_new = rho_o(i,j,k)*heat_o(i,j,k) + l_dt *
+                        ( dhdt_o(i,j,k) + m_half * laps_temp_o(i,j,k) );
+                    heat(i,j,k) = heat_new/rho(i,j,k);
+                });
+            }
+            else if (m_diff_type == DiffusionType::Implicit)
+            {
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                {
+                    Real heat_new = rho_o(i,j,k)*heat_o(i,j,k) + l_dt *
+                        ( dhdt_o(i,j,k) );
+                    heat(i,j,k) = heat_new/rho(i,j,k);
+                });
+            }
+        } // mfi
+    } // lev
+}
+
+void incflo::heat_explicit_update_corrector ()
+{
+    if (m_advect_heat == 0) { return; }
+
+    constexpr Real m_half = Real(0.5);
+    Real l_dt = m_dt;
+    for (int lev = 0; lev <= finest_level; lev++)
+    {
+        auto& ld = *m_leveldata[lev];
+#ifdef _OPENMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+        for (MFIter mfi(ld.heat,TilingIfNotGPU()); mfi.isValid(); ++mfi)
+        {
+            Box const& bx = mfi.tilebox();
+            Array4<Real const> const& heat_o   = ld.heat_o.const_array(mfi);
+            Array4<Real const> const& rho_o   = ld.density_o.const_array(mfi);
+            Array4<Real      > const& heat     = ld.heat.array(mfi);
+            Array4<Real const> const& rho     = ld.density.const_array(mfi);
+            Array4<Real const> const& dhdt_o  = ld.conv_heat_o.const_array(mfi);
+            Array4<Real const> const& dhdt    = ld.conv_heat.const_array(mfi);
+
+            if (m_diff_type == DiffusionType::Explicit)
+            {
+                Array4<Real const> const& laps_temp_o = ld.laps_temp_o.const_array(mfi);
+                Array4<Real const> const& laps_temp   = ld.laps_temp.const_array(mfi);
+
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                {
+                    Real heat_new = rho_o(i,j,k)*heat_o(i,j,k) + l_dt * (
+                        m_half*(  dhdt(i,j,k) + dhdt_o(i,j,k))
+                        +m_half*(laps_temp_o(i,j,k) +   laps_temp(i,j,k)) );
+
+                    heat(i,j,k) = heat_new / rho(i,j,k);
+                });
+            }
+            else if (m_diff_type == DiffusionType::Crank_Nicolson)
+            {
+                Array4<Real const> const& laps_temp_o = ld.laps_temp_o.const_array(mfi);
+
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                {
+                    Real heat_new = rho_o(i,j,k)*heat_o(i,j,k) + l_dt * (
+                        m_half*(  dhdt(i,j,k) + dhdt_o(i,j,k))
+                        +m_half*(laps_temp_o(i,j,k)) );
+
+                    heat(i,j,k) = heat_new / rho(i,j,k);
+                });
+            }
+            else if (m_diff_type == DiffusionType::Implicit)
+            {
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
+                {
+                    Real heat_new = rho_o(i,j,k)*heat_o(i,j,k) + l_dt * (
+                        m_half*(  dhdt(i,j,k)+dhdt_o(i,j,k)) );
+
+                    heat(i,j,k) = heat_new / rho(i,j,k);
+                });
+            }
+        } // mfi
+    } // lev
+}

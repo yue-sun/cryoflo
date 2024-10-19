@@ -33,6 +33,10 @@ void incflo::MakeNewLevelFromCoarse (int lev,
     if (m_ntrac > 0) {
         fillcoarsepatch_tracer(lev, time, new_leveldata->tracer, 0);
     }
+    if (m_advect_heat) {
+        fillcoarsepatch_temp(lev, time, new_leveldata->temp, 0);
+        fillcoarsepatch_heat(lev, time, new_leveldata->heat, 0);
+    }
     fillcoarsepatch_gradp(lev, time, new_leveldata->gp, 0);
 
     new_leveldata->p_cc.setVal(0.0);
@@ -82,6 +86,10 @@ void incflo::RemakeLevel (int lev, Real time, const BoxArray& ba,
     fillpatch_density(lev, time, new_leveldata->density, 0);
     if (m_ntrac > 0) {
         fillpatch_tracer(lev, time, new_leveldata->tracer, 0);
+    }
+    if (m_advect_heat) {
+        fillpatch_temp(lev, time, new_leveldata->temp, 0);
+        fillpatch_heat(lev, time, new_leveldata->heat, 0);
     }
     fillpatch_gradp(lev, time, new_leveldata->gp, 0);
 
